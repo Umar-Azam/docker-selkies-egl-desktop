@@ -72,7 +72,6 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         gzip \
         xz-utils \
         unar \
-        rar \
         unrar \
         zip \
         unzip \
@@ -80,6 +79,8 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         gcc \
         git \
         dnsutils \
+        avahi-daemon \
+        libnss-mdns \
         coturn \
         jq \
         python3 \
@@ -142,7 +143,6 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         xserver-xorg-input-all \
         xserver-xorg-input-wacom \
         xserver-xorg-video-all \
-        xserver-xorg-video-intel \
         xserver-xorg-video-qxl \
         # NVIDIA driver installer dependencies
         libc6-dev \
@@ -171,6 +171,13 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         nginx \
         apache2-utils \
         netcat-openbsd && \
+    # Resolve WebRTC mDNS ICE host candidates (*.local) from browsers such as Chromium.
+    if grep -qE '^hosts:.*files dns' /etc/nsswitch.conf; then \
+    sed -i 's/^hosts:.*/hosts:          files mdns4_minimal [NOTFOUND=return] dns mdns4/' /etc/nsswitch.conf; fi && \
+    # Install packages that are often absent on non-amd64 archives
+    if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+    if apt-cache show rar >/dev/null 2>&1; then apt-get install --no-install-recommends -y rar; fi && \
+    if apt-cache show xserver-xorg-video-intel >/dev/null 2>&1; then apt-get install --no-install-recommends -y xserver-xorg-video-intel; fi; fi && \
     # Sanitize NGINX path
     sed -i -e 's/\/var\/log\/nginx\/access\.log/\/dev\/stdout/g' -e 's/\/var\/log\/nginx\/error\.log/\/dev\/stderr/g' -e 's/\/run\/nginx\.pid/\/tmp\/nginx\.pid/g' /etc/nginx/nginx.conf && \
     echo "error_log /dev/stderr;" >> /etc/nginx/nginx.conf && \
@@ -230,8 +237,8 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libglx0:i386 \
         libglu1:i386 \
         libsm6:i386; fi && \
-    # Install nvidia-vaapi-driver, requires the kernel parameter `nvidia_drm.modeset=1` set to run correctly
-    if [ "$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '\"')" \> "20.04" ]; then \
+    # Install nvidia-vaapi-driver only on desktop x86_64. Jetson/L4T arm64 does not use this VAAPI bridge path.
+    if [ "$(dpkg --print-architecture)" = "amd64" ] && [ "$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '\"')" \> "20.04" ]; then \
     apt-get update && apt-get install --no-install-recommends -y \
         meson \
         gstreamer1.0-plugins-bad \
@@ -239,8 +246,10 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         libva-dev \
         libegl-dev \
         libgstreamer-plugins-bad1.0-dev && \
-    NVIDIA_VAAPI_DRIVER_VERSION="$(curl -fsSL "https://api.github.com/repos/elFarto/nvidia-vaapi-driver/releases/latest" | jq -r '.tag_name' | sed 's/[^0-9\.\-]*//g')" && \
-    cd /tmp && curl -fsSL "https://github.com/elFarto/nvidia-vaapi-driver/archive/v${NVIDIA_VAAPI_DRIVER_VERSION}.tar.gz" | tar -xzf - && mv -f nvidia-vaapi-driver* nvidia-vaapi-driver && cd nvidia-vaapi-driver && meson setup build && meson install -C build && rm -rf /tmp/*; fi && \
+    NVIDIA_VAAPI_DRIVER_VERSION="${NVIDIA_VAAPI_DRIVER_VERSION:-0.0.13}" && \
+    cd /tmp && curl -fLS --connect-timeout 20 --max-time 180 "https://github.com/elFarto/nvidia-vaapi-driver/archive/v${NVIDIA_VAAPI_DRIVER_VERSION}.tar.gz" | tar -xzf - && \
+    mv -f nvidia-vaapi-driver* nvidia-vaapi-driver && cd nvidia-vaapi-driver && meson setup build && meson install -C build && \
+    cd / && rm -rf /tmp/nvidia-vaapi-driver /tmp/nvidia-vaapi-driver-*; fi && \
     apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/debconf/* /var/log/* /tmp/* /var/tmp/* && \
     echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf && \
     echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf && \
@@ -284,7 +293,10 @@ ENV DISPLAY_DPI=96
 ENV DISPLAY_CDEPTH=24
 ENV VGL_DISPLAY=egl
 ENV KASMVNC_ENABLE=false
-ENV SELKIES_ENCODER=nvh264enc
+# Use `auto` to pick NVIDIA NVENC when available, otherwise software fallback.
+ENV SELKIES_ENCODER=auto
+# `auto` skips NVIDIA runfile userspace install on Jetson/L4T where toolkit CSV mounts are expected.
+ENV SELKIES_INSTALL_NVIDIA_DRIVER=auto
 ENV SELKIES_ENABLE_RESIZE=false
 ENV SELKIES_ENABLE_BASIC_AUTH=true
 
@@ -444,7 +456,8 @@ Pin-Priority: -1" > /etc/apt/preferences.d/firefox-nosnap && \
         libreoffice-kf5 \
         libreoffice-plasma \
         libreoffice-style-breeze && \
-    # Ensure Firefox as the default web browser
+    # Ensure Firefox as the default web browser and launch via VirtualGL in EGL containers.
+    sed -i 's/^Exec=/Exec=vglrun /' /usr/share/applications/firefox.desktop && \
     xdg-settings set default-web-browser firefox.desktop && \
     update-alternatives --set x-www-browser /usr/bin/firefox && \
     # Install Google Chrome for supported architectures
@@ -519,8 +532,16 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
         python3-pip \
         python3-dev \
         python3-gi \
+        python3-gst-1.0 \
         python3-setuptools \
         python3-wheel \
+        gir1.2-gstreamer-1.0 \
+        gir1.2-gst-plugins-base-1.0 \
+        gir1.2-gst-plugins-bad-1.0 \
+        gstreamer1.0-nice \
+        gstreamer1.0-plugins-bad \
+        gstreamer1.0-plugins-ugly \
+        libwebrtc-audio-processing1 \
         libgcrypt20 \
         libgirepository-1.0-1 \
         glib-networking \
@@ -562,7 +583,24 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     if [ "$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '\"')" \> "20.04" ]; then apt-get install --no-install-recommends -y xcvt libopenh264-dev svt-av1 aom-tools; else apt-get install --no-install-recommends -y mesa-utils-extra; fi && \
     # Automatically fetch the latest Selkies version and install the components
     SELKIES_VERSION="$(curl -fsSL "https://api.github.com/repos/selkies-project/selkies/releases/latest" | jq -r '.tag_name' | sed 's/[^0-9\.\-]*//g')" && \
-    cd /opt && curl -fsSL "https://github.com/selkies-project/selkies/releases/download/v${SELKIES_VERSION}/gstreamer-selkies_gpl_v${SELKIES_VERSION}_ubuntu$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '\"')_$(dpkg --print-architecture).tar.gz" | tar -xzf - && \
+    SELKIES_OS_VERSION="$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '\"')" && \
+    SELKIES_ARCH="$(dpkg --print-architecture)" && \
+    SELKIES_GSTREAMER_URL="https://github.com/selkies-project/selkies/releases/download/v${SELKIES_VERSION}/gstreamer-selkies_gpl_v${SELKIES_VERSION}_ubuntu${SELKIES_OS_VERSION}_${SELKIES_ARCH}.tar.gz" && \
+    if curl -fsSIL "${SELKIES_GSTREAMER_URL}" >/dev/null 2>&1; then \
+    cd /opt && curl -fsSL "${SELKIES_GSTREAMER_URL}" | tar -xzf -; \
+    else \
+    echo "No prebuilt Selkies GPL GStreamer bundle for ubuntu${SELKIES_OS_VERSION}/${SELKIES_ARCH}, using system GStreamer fallback" && \
+    MULTI_ARCH="$(dpkg --print-architecture | sed -e 's/arm64/aarch64-linux-gnu/' -e 's/armhf/arm-linux-gnueabihf/' -e 's/riscv64/riscv64-linux-gnu/' -e 's/ppc64el/powerpc64le-linux-gnu/' -e 's/s390x/s390x-linux-gnu/' -e 's/i.*86/i386-linux-gnu/' -e 's/amd64/x86_64-linux-gnu/' -e 's/unknown/x86_64-linux-gnu/')" && \
+    mkdir -pm755 "/opt/gstreamer/lib/${MULTI_ARCH}" && \
+    echo "export GSTREAMER_PATH=/opt/gstreamer\n\
+export PATH=\"/usr/bin\${PATH:+:\${PATH}}\"\n\
+export GST_PLUGIN_SYSTEM_PATH=\"\${GST_PLUGIN_SYSTEM_PATH:-/usr/lib/${MULTI_ARCH}/gstreamer-1.0:/usr/lib/gstreamer-1.0}\"\n\
+export GST_PLUGIN_PATH=\"\${GST_PLUGIN_PATH:-\${GST_PLUGIN_SYSTEM_PATH}}\"\n\
+export GI_TYPELIB_PATH=\"/usr/lib/${MULTI_ARCH}/girepository-1.0:/usr/lib/girepository-1.0\${GI_TYPELIB_PATH:+:\${GI_TYPELIB_PATH}}\"\n\
+export PYTHONPATH=\"/usr/lib/python3/dist-packages\${PYTHONPATH:+:\${PYTHONPATH}}\"\n\
+export LD_LIBRARY_PATH=\"\${LD_LIBRARY_PATH:+\${LD_LIBRARY_PATH}:}/usr/lib/${MULTI_ARCH}\"\n\
+" > /opt/gstreamer/gst-env; \
+    fi && \
     cd /tmp && curl -O -fsSL "https://github.com/selkies-project/selkies/releases/download/v${SELKIES_VERSION}/selkies_gstreamer-${SELKIES_VERSION}-py3-none-any.whl" && pip3 install --no-cache-dir --force-reinstall "selkies_gstreamer-${SELKIES_VERSION}-py3-none-any.whl" "websockets<14.0" && rm -f "selkies_gstreamer-${SELKIES_VERSION}-py3-none-any.whl" && \
     cd /opt && curl -fsSL "https://github.com/selkies-project/selkies/releases/download/v${SELKIES_VERSION}/selkies-gstreamer-web_v${SELKIES_VERSION}.tar.gz" | tar -xzf - && \
     cd /tmp && curl -o selkies-js-interposer.deb -fsSL "https://github.com/selkies-project/selkies/releases/download/v${SELKIES_VERSION}/selkies-js-interposer_v${SELKIES_VERSION}_ubuntu$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '\"')_$(dpkg --print-architecture).deb" && apt-get update && apt-get install --no-install-recommends -y ./selkies-js-interposer.deb && rm -f selkies-js-interposer.deb && \
@@ -590,6 +628,8 @@ COPY --chown=1000:1000 kasmvnc-entrypoint.sh /etc/kasmvnc-entrypoint.sh
 RUN chmod -f 755 /etc/kasmvnc-entrypoint.sh
 COPY --chown=1000:1000 supervisord.conf /etc/supervisord.conf
 RUN chmod -f 755 /etc/supervisord.conf
+COPY --chown=1000:1000 scripts/validate-acceleration.sh /usr/local/bin/validate-acceleration
+RUN chmod -f 755 /usr/local/bin/validate-acceleration
 
 # Configure coTURN script
 RUN echo "#!/bin/bash\n\
@@ -630,8 +670,8 @@ ENV PIPEWIRE_RUNTIME_DIR="${PIPEWIRE_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/tmp}}"
 ENV PULSE_RUNTIME_PATH="${PULSE_RUNTIME_PATH:-${XDG_RUNTIME_DIR:-/tmp}/pulse}"
 ENV PULSE_SERVER="${PULSE_SERVER:-unix:${PULSE_RUNTIME_PATH:-${XDG_RUNTIME_DIR:-/tmp}/pulse}/native}"
 
-# dbus-daemon to the below address is required during startup
-ENV DBUS_SYSTEM_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR:-/tmp}/dbus-system-bus"
+# dbus-daemon address shared by services such as Avahi mDNS in the container.
+ENV DBUS_SYSTEM_BUS_ADDRESS="unix:path=/run/dbus/system_bus_socket"
 
 USER 1000
 ENV SHELL=/bin/bash

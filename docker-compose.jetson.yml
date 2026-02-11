@@ -1,0 +1,20 @@
+services:
+  egl:
+    # Build arm64 locally on Jetson until arm64 images are published.
+    image: selkies-egl-desktop:jetson
+    platform: linux/arm64
+    build:
+      context: .
+      args:
+        DISTRIB_RELEASE: "22.04"
+    # WebRTC ICE host candidates (including mDNS hostnames) work more reliably
+    # on Jetson when sharing the host network namespace.
+    network_mode: host
+    ports: []
+    environment:
+    # Chromium builds without proprietary H.264 support will reject x264 offers
+    # and trigger a gstwebrtcbin abort path. VP8 is broadly interoperable.
+    - SELKIES_ENCODER=vp8enc
+    - SELKIES_INSTALL_NVIDIA_DRIVER=auto
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all

@@ -47,8 +47,10 @@ services:
     ###
     # Selkies parameters, for additional configurations see `selkies-gstreamer --help`
     ###
-    # Change `SELKIES_ENCODER` to `x264enc`, `vp8enc`, or `vp9enc` if using software fallback without allocated GPUs or your GPU does not support `H.264 (AVCHD)` under the `NVENC - Encoding` section in https://developer.nvidia.com/video-encode-and-decode-gpu-support-matrix-new
-    - SELKIES_ENCODER=nvh264enc
+    # Use `auto` to pick `nvh264enc` when NVENC is present and fall back to `x264enc` otherwise.
+    - SELKIES_ENCODER=auto
+    # Keep `auto` for NVIDIA desktop GPUs and Jetson/L4T; set `true` only if you explicitly want NVIDIA runfile userspace installation.
+    - SELKIES_INSTALL_NVIDIA_DRIVER=auto
     - SELKIES_ENABLE_RESIZE=false
     # Initial video bitrate in kilobits per second, may be changed later within web interface
     - SELKIES_VIDEO_BITRATE=8000

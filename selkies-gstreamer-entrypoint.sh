@@ -30,7 +30,29 @@ export GSTREAMER_PATH=/opt/gstreamer
 # Source environment for GStreamer
 . /opt/gstreamer/gst-env
 
-export SELKIES_ENCODER="${SELKIES_ENCODER:-x264enc}"
+has_linker_lib() {
+  ldconfig -p 2>/dev/null | awk '{print $1}' | grep -Fxq "$1"
+}
+
+has_gstreamer_encoder() {
+  gst-inspect-1.0 "$1" >/dev/null 2>&1
+}
+
+# Use software encoding when NVENC userspace is unavailable (e.g. Jetson Orin Nano has no NVENC hardware block).
+SELKIES_ENCODER_LOWER="$(echo "${SELKIES_ENCODER:-auto}" | tr '[:upper:]' '[:lower:]')"
+if [ -z "${SELKIES_ENCODER:-}" ] || [ "${SELKIES_ENCODER_LOWER}" = "auto" ]; then
+  if has_gstreamer_encoder "nvh264enc" && has_linker_lib "libnvidia-encode.so.1"; then
+    export SELKIES_ENCODER="nvh264enc"
+  else
+    export SELKIES_ENCODER="x264enc"
+  fi
+elif [ "${SELKIES_ENCODER_LOWER}" = "nvh264enc" ] && { ! has_gstreamer_encoder "nvh264enc" || ! has_linker_lib "libnvidia-encode.so.1"; }; then
+  echo "SELKIES_ENCODER=nvh264enc requested but NVENC runtime is not available, falling back to x264enc"
+  export SELKIES_ENCODER="x264enc"
+else
+  export SELKIES_ENCODER
+fi
+
 export SELKIES_ENABLE_RESIZE="${SELKIES_ENABLE_RESIZE:-false}"
 if [ -z "${SELKIES_TURN_REST_URI}" ] && { { [ -z "${SELKIES_TURN_USERNAME}" ] || [ -z "${SELKIES_TURN_PASSWORD}" ]; } && [ -z "${SELKIES_TURN_SHARED_SECRET}" ] || [ -z "${SELKIES_TURN_HOST}" ] || [ -z "${SELKIES_TURN_PORT}" ]; }; then
   export TURN_RANDOM_PASSWORD="$(tr -dc 'A-Za-z0-9' < /dev/urandom 2>/dev/null | head -c 24)"

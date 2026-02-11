@@ -26,6 +26,55 @@ There are two web interfaces that may be chosen in this container, the first bei
 
 The KasmVNC interface can be enabled in place of Selkies by setting `KASMVNC_ENABLE` to `true`. `KASMVNC_THREADS` sets the number of threads KasmVNC should use for frame encoding, defaulting to all threads if not set. When using the KasmVNC interface, environment variables `SELKIES_ENABLE_BASIC_AUTH`, `SELKIES_BASIC_AUTH_USER`, `SELKIES_BASIC_AUTH_PASSWORD`, `SELKIES_ENABLE_RESIZE`, `SELKIES_ENABLE_HTTPS`, `SELKIES_HTTPS_CERT`, `SELKIES_HTTPS_KEY`, `SELKIES_PORT`, `NGINX_PORT`, and `TURN_EXTERNAL_IP`, used with Selkies, are also inherited. As with the Selkies WebRTC interface, the KasmVNC interface username and password will also be set to the environment variables `SELKIES_BASIC_AUTH_USER` and `SELKIES_BASIC_AUTH_PASSWORD`, also using `ubuntu` and the environment variable `PASSWD` by default if not set.
 
+### Jetson (Orin Nano, JetPack 6.2.1 / L4T R36.4.7)
+
+This repository includes a Jetson-compatible path that preserves the existing architecture and only adds a small compose overlay plus startup/validation scripts.
+
+Jetson-specific incompatibilities in the default x86_64 flow:
+
+1. Container startup defaults to an `nvh264enc` path (`SELKIES_ENCODER=auto`) that is not available on Orin Nano, causing the browser session to stall at `Waiting for stream.`.
+2. Jetson uses L4T-mounted NVIDIA userspace from the host runtime, so desktop GPU runfile install assumptions must stay disabled (`SELKIES_INSTALL_NVIDIA_DRIVER=auto`).
+3. WebRTC ICE candidate exchange is less reliable with bridged networking on this target; host networking avoids this for single-container Jetson use.
+4. mDNS host candidate resolution and D-Bus service wiring are required for stable ICE behavior (`libnss-mdns`, `avahi-daemon`, explicit system bus setup).
+5. amd64-only package/runtime paths must be guarded so the same Dockerfile builds correctly on arm64.
+
+Run on Jetson:
+
+```bash
+./scripts/launch-jetson-desktop.sh
+```
+
+This script builds and runs with `docker-compose.yml` + `docker-compose.jetson.yml`, then prints the URL:
+
+- URL: `http://localhost:8080`
+- Username: `ubuntu`
+- Password: `mypasswd` (from compose defaults)
+
+Validate on Jetson:
+
+```bash
+# End-to-end smoke test (startup + in-container GPU/browser checks)
+./scripts/jetson-smoke-test.sh
+
+# Optional direct acceleration check in running container
+docker compose -f docker-compose.yml -f docker-compose.jetson.yml exec -T egl bash -lc /usr/local/bin/validate-acceleration
+```
+
+Expected validation signals:
+
+- Browser reaches `Peer connection state: connected` and video dimensions become non-zero (for example `1920x1080`).
+- `glxinfo` reports NVIDIA vendor/renderer (Orin/Tegra).
+- `vulkaninfo --summary` lists an NVIDIA device.
+- Firefox process maps include NVIDIA GL libraries (`libEGL_nvidia`, `libGLX_nvidia`, or `libnvidia-glcore`).
+
+Jetson-specific implementation deltas:
+
+- `docker-compose.jetson.yml`: arm64 local build/tag, `network_mode: host`, `SELKIES_ENCODER=vp8enc`.
+- `entrypoint.sh`: explicit Jetson-safe NVIDIA userspace install behavior via `SELKIES_INSTALL_NVIDIA_DRIVER=auto`.
+- `Dockerfile`: arm64-safe package/install gates and runtime dependencies for mDNS + Avahi.
+- `supervisord.conf`: system D-Bus process and `avahi-daemon` supervision for ICE/mDNS stability.
+- `scripts/launch-jetson-desktop.sh`, `scripts/jetson-smoke-test.sh`, `scripts/validate-acceleration.sh`: reproducible launch and validation workflow.
+
 ### Running with Docker
 
 **1. Run the container with Docker, Podman, or other NVIDIA-supported container runtimes ([NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) required):**
