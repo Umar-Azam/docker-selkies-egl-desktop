@@ -51,6 +51,7 @@ This script runs with `docker-compose.yml` + `docker-compose.jetson.yml`, then p
 - Password: `mypasswd` (from compose defaults)
 
 For agent-oriented usage and GUI validation workflow, see [`AGENT_README.md`](AGENT_README.md).
+For MCP-based screenshot/computer-use control, see [`docs/AGENT_MCP_SETUP.md`](docs/AGENT_MCP_SETUP.md).
 
 Validate on Jetson:
 
@@ -76,6 +77,7 @@ Jetson-specific implementation deltas:
 - `Dockerfile`: arm64-safe package/install gates and runtime dependencies for mDNS + Avahi.
 - `supervisord.conf`: system D-Bus process and `avahi-daemon` supervision for ICE/mDNS stability.
 - `scripts/launch-jetson-desktop.sh`, `scripts/post-launch-install.sh`, `scripts/jetson-smoke-test.sh`, `scripts/validate-acceleration.sh`: reproducible launch and validation workflow with a post-setup install hook.
+- `scripts/selkies_desktop_mcp_server.py`, `scripts/mcp-gui-smoke-test.py`: MCP server and smoke test for agent screenshot/computer-use automation.
 
 ### Running with Docker
 

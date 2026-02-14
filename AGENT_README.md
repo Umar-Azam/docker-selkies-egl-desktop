@@ -53,7 +53,23 @@ Artifacts:
 
 - JSON status + screenshot in `/tmp/selkies-agent-gui/`
 
-## 4. Validate In-Container GPU Acceleration
+## 4. MCP Computer-Use Interface
+
+This repository includes an MCP server for GUI screenshots + actions:
+
+- server: `scripts/selkies_desktop_mcp_server.py`
+- smoke test: `scripts/mcp-gui-smoke-test.py`
+- setup/deployment guide: `docs/AGENT_MCP_SETUP.md`
+
+Quick smoke test:
+
+```bash
+conda run -n codex pip install -r ./scripts/requirements-mcp.txt
+conda run -n codex playwright install chromium firefox
+conda run -n codex python ./scripts/mcp-gui-smoke-test.py --browser chromium
+```
+
+## 5. Validate In-Container GPU Acceleration
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.jetson.yml exec -T egl bash -lc /usr/local/bin/validate-acceleration
@@ -65,7 +81,7 @@ Expected:
 - Vulkan summary lists NVIDIA device
 - Firefox process maps include NVIDIA GL libraries
 
-## 5. If Docker Requires Privileged Screen Session
+## 6. If Docker Requires Privileged Screen Session
 
 If direct docker access is unavailable, run docker commands through a privileged `screen` session.
 
