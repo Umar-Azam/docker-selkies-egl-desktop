@@ -44,11 +44,13 @@ Run on Jetson:
 ./scripts/launch-jetson-desktop.sh
 ```
 
-This script builds and runs with `docker-compose.yml` + `docker-compose.jetson.yml`, then prints the URL:
+This script runs with `docker-compose.yml` + `docker-compose.jetson.yml`, then prints the URL. It only rebuilds when the local image `selkies-egl-desktop:jetson` is missing (or `FORCE_REBUILD=true` is set), and executes `scripts/post-launch-install.sh` after desktop startup for optional custom package installation.
 
 - URL: `http://localhost:8080`
 - Username: `ubuntu`
 - Password: `mypasswd` (from compose defaults)
+
+For agent-oriented usage and GUI validation workflow, see [`AGENT_README.md`](AGENT_README.md).
 
 Validate on Jetson:
 
@@ -73,7 +75,7 @@ Jetson-specific implementation deltas:
 - `entrypoint.sh`: explicit Jetson-safe NVIDIA userspace install behavior via `SELKIES_INSTALL_NVIDIA_DRIVER=auto`.
 - `Dockerfile`: arm64-safe package/install gates and runtime dependencies for mDNS + Avahi.
 - `supervisord.conf`: system D-Bus process and `avahi-daemon` supervision for ICE/mDNS stability.
-- `scripts/launch-jetson-desktop.sh`, `scripts/jetson-smoke-test.sh`, `scripts/validate-acceleration.sh`: reproducible launch and validation workflow.
+- `scripts/launch-jetson-desktop.sh`, `scripts/post-launch-install.sh`, `scripts/jetson-smoke-test.sh`, `scripts/validate-acceleration.sh`: reproducible launch and validation workflow with a post-setup install hook.
 
 ### Running with Docker
 
